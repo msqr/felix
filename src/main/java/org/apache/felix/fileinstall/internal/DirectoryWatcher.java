@@ -38,7 +38,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -1256,24 +1255,21 @@ public class DirectoryWatcher extends Thread implements BundleListener
         final CountDownLatch latch = new CountDownLatch(bundles.size());
         final List<Bundle> started = new ArrayList<Bundle>(bundles.size());
         for ( final Bundle bundle : bundles ) {
-            Callable<Boolean> startTask = new Callable<Boolean>() {
+        	 executorService.submit(new Runnable() {
 
                 @Override
-                public Boolean call() throws Exception {
+                public void run() {
                     try {
                         if ( isFragment(bundle) || startBundle(bundle, logFailures) ) {
                             synchronized ( started ) {
                                 started.add(bundle);
                             }
-                            return true;
                         }
-                        return false;
                     } finally {
                         latch.countDown();
                     }
                 }
-            };
-            executorService.submit(startTask);
+            });
         }
         try {
             latch.await();
