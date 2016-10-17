@@ -38,6 +38,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.jar.JarInputStream;
 import java.util.jar.Manifest;
@@ -107,6 +119,8 @@ public class DirectoryWatcher extends Thread implements BundleListener
     public final static String FRAGMENT_SCOPE = "felix.fileinstall.fragmentRefreshScope";
     public final static String DISABLE_NIO2 = "felix.fileinstall.disableNio2";
     public final static String SUBDIR_MODE = "felix.fileinstall.subdir.mode";
+    public final static String ASYNC_START_TASKS = "felix.fileinstall.start.tasks";
+    public final static String ASYNC_RETRY_DELAY = "felix.fileinstall.start.tasksRetryDelay";
 
     public final static String SCOPE_NONE = "none";
     public final static String SCOPE_MANAGED = "managed";
@@ -136,6 +150,9 @@ public class DirectoryWatcher extends Thread implements BundleListener
     String fragmentScope;
     String optionalScope;
     boolean disableNio2;
+    int asyncStartTasks;
+    int asyncStartRetryDelay;
+    private ExecutorService executorService;
 
     // Map of all installed artifacts
     final Map<File, Artifact> currentManagedArtifacts = new HashMap<File, Artifact>();
@@ -184,6 +201,15 @@ public class DirectoryWatcher extends Thread implements BundleListener
         fragmentScope = properties.get(FRAGMENT_SCOPE);
         optionalScope = properties.get(OPTIONAL_SCOPE);
         disableNio2 = getBoolean(properties, DISABLE_NIO2, false);
+        asyncStartTasks = getInt(properties, ASYNC_START_TASKS, 0);
+        asyncStartRetryDelay = getInt(properties, ASYNC_RETRY_DELAY, 1);
+        if ( asyncStartTasks > 0 ) {
+            if ( asyncStartTasks < 99 ) {
+                executorService = Executors.newFixedThreadPool(asyncStartTasks);
+            } else {
+                executorService = Executors.newCachedThreadPool();
+            }
+        }
         this.context.addBundleListener(this);
 
         if (disableNio2) {
@@ -1220,12 +1246,73 @@ public class DirectoryWatcher extends Thread implements BundleListener
     {
         // Check if this is the consistent set of bundles which failed previously.
         boolean logFailures = bundles.equals(consistentlyFailingBundles);
+        if ( asyncStartTasks > 0 && bundles.size() > 0 ) {
+            startBundlesAsync(bundles, logFailures);
+            return;
+        }
         for (Iterator<Bundle> b = bundles.iterator(); b.hasNext(); )
         {
             if (startBundle(b.next(), logFailures))
             {
                 b.remove();
             }
+        }
+    }
+
+    private void startBundlesAsync(final Collection<Bundle> bundles, final boolean logFailures)
+    {
+        final CountDownLatch latch = new CountDownLatch(bundles.size());
+        final List<Bundle> started = new ArrayList<Bundle>(bundles.size());
+        for ( final Bundle bundle : bundles ) {
+            Callable<Boolean> startTask = new Callable<Boolean>() {
+
+                @Override
+                public Boolean call() throws Exception {
+                    try {
+                        if ( isFragment(bundle) || startBundle(bundle, logFailures) ) {
+                            synchronized ( started ) {
+                                started.add(bundle);
+                            }
+                            return true;
+                        }
+                        return false;
+                    } finally {
+                        latch.countDown();
+                    }
+                }
+            };
+            executorService.submit(startTask);
+        }
+        try {
+            latch.await();
+            if ( started.size() == bundles.size() ) {
+                bundles.clear();
+            } else {
+                for ( Bundle b : started ) {
+                    bundles.remove(b);
+            }
+                if ( poll < 1 ) {
+                    // need to circle back and try again in a bit...
+                    executorService.submit(new Runnable() {
+                        
+                        @Override
+                        public void run() {
+                            try {
+                                Thread.sleep(asyncStartRetryDelay * 1000L);
+                            } catch ( InterruptedException e ) {
+                                // ignore
+                            }
+                            // Should this actually call DirectoryWatcher.run instead
+                            // to deal with consistentlyFailingBundles? For now simply
+                            // calling startBundlesAsync again, assuming any failures
+                            // are from non-yet-ready dependencies (e.g. Blueprint)
+                            startBundlesAsync(bundles, logFailures);
+                        }
+                    });
+                }
+            }
+        } catch ( InterruptedException e ) {
+            throw new RuntimeException(e);
         }
     }
 
