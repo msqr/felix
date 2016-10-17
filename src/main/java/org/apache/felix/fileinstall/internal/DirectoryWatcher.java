@@ -1282,7 +1282,7 @@ public class DirectoryWatcher extends Thread implements BundleListener
             } else {
                 for ( Bundle b : started ) {
                     bundles.remove(b);
-            }
+                }
                 if ( poll < 1 ) {
                     // need to circle back and try again in a bit...
                     executorService.submit(new Runnable() {
