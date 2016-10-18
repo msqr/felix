@@ -1274,7 +1274,7 @@ public class DirectoryWatcher extends Thread implements BundleListener
         final CountDownLatch latch = new CountDownLatch(bundles.size());
         final List<Bundle> started = new ArrayList<Bundle>(bundles.size());
         for ( final Bundle bundle : bundles ) {
-        	 executorService.submit(new Runnable() {
+            executorService.submit(new Runnable() {
 
                 @Override
                 public void run() {
