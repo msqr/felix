@@ -810,6 +810,9 @@ public class DirectoryWatcher extends Thread implements BundleListener
             deleteTransformedFile(artifact);
             deleteJaredDirectory(artifact);
         }
+        if ( executorService != null && !executorService.isShutdown() ) {
+            executorService.shutdownNow();
+        }
         try
         {
             scanner.close();
@@ -1294,6 +1297,10 @@ public class DirectoryWatcher extends Thread implements BundleListener
             latch.await();
             if ( started.size() == bundles.size() ) {
                 bundles.clear();
+                if ( poll < 1 ) {
+                    // all bundles have been started, and we're not polling so can shutdown thread pool
+                    executorService.shutdown();
+                }
             } else {
                 for ( Bundle b : started ) {
                     bundles.remove(b);
