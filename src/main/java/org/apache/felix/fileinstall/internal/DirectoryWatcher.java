@@ -194,8 +194,8 @@ public class DirectoryWatcher extends Thread implements BundleListener
         disableNio2 = getBoolean(properties, DISABLE_NIO2, false);
         asyncStartTasks = getInt(properties, ASYNC_START_TASKS, 0);
         asyncStartRetryDelay = getInt(properties, ASYNC_RETRY_DELAY, 1);
-        if ( asyncStartTasks > 0 ) {
-            if ( asyncStartTasks < 99 ) {
+        if ( asyncStartTasks != 0 ) {
+            if ( asyncStartTasks > 0 ) {
                 executorService = Executors.newFixedThreadPool(asyncStartTasks);
             } else {
                 executorService = Executors.newCachedThreadPool();
