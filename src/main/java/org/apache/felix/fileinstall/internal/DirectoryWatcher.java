@@ -348,6 +348,10 @@ public class DirectoryWatcher extends Thread implements BundleListener
                         process(files);
                     }
                 }
+                if (poll < 1) {
+                    // we're not actually looking for changes, so we're done    
+                    return;
+                }
                 synchronized (this) {
                     wait(poll);
                 }
