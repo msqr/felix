@@ -41,7 +41,12 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.JarInputStream;
 import java.util.jar.Manifest;
 
@@ -166,6 +171,15 @@ public class DirectoryWatcher extends Thread implements BundleListener
     // flag (acces to which must be synchronized) that indicates wheter there's a change in state of system,
     // which may result in an attempt to start the watched bundles
     private AtomicBoolean stateChanged = new AtomicBoolean();
+    
+    private class StartTaskThreadFactory implements ThreadFactory {
+        private final AtomicInteger threadNumber = new AtomicInteger(1);
+
+        @Override
+        public Thread newThread(Runnable r) {
+            return new Thread(r, getName()+"-start-"+threadNumber.getAndIncrement());
+        }
+    }
 
     public DirectoryWatcher(FileInstall fileInstall, Map<String, String> properties, BundleContext context)
     {
@@ -195,10 +209,15 @@ public class DirectoryWatcher extends Thread implements BundleListener
         asyncStartTasks = getInt(properties, ASYNC_START_TASKS, 0);
         asyncStartRetryDelay = getInt(properties, ASYNC_RETRY_DELAY, 1);
         if ( asyncStartTasks != 0 ) {
+            ThreadFactory threadFactory = new StartTaskThreadFactory();
             if ( asyncStartTasks > 0 ) {
-                executorService = Executors.newFixedThreadPool(asyncStartTasks);
+                // create a dynamic but bounded thread pool so threads aren't hanging around unnecessarily
+                ThreadPoolExecutor tpExecutor = new ThreadPoolExecutor(asyncStartTasks, asyncStartTasks, 
+                        60, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>(), threadFactory);
+                tpExecutor.allowCoreThreadTimeOut(true);
+                executorService = tpExecutor;
             } else {
-                executorService = Executors.newCachedThreadPool();
+                executorService = Executors.newCachedThreadPool(threadFactory);
             }
         }
         this.context.addBundleListener(this);
